@@ -1,4 +1,4 @@
-//As written this file gets about 73 messges per second (73Hz). We expect 200, and our goal is 100.
+//As written this file gets about  messges per second (Hz). We expect 200, and our goal is 100.
 
 //--Start Includes--//
 
@@ -12,8 +12,7 @@
 // ↑ Needed for micro_ros
 
 // ↓ Needed for the IMU
-#include <Adafruit_MPU6050.h> //https://github.com/adafruit/Adafruit_MPU6050
-#include <Adafruit_Sensor.h>  //https://github.com/adafruit/Adafruit_Sensor
+#include <basicMPU6050.h> //https://github.com/RCmags/basicMPU6050/blob/main/examples/parameters/parameters.ino
 // ↑ Needed for mthe IMU
 
 //This is needed for the multiplexor
@@ -38,11 +37,68 @@ rcl_publisher_t publisher2;
 rcl_publisher_t publisher3;
 rcl_publisher_t publisher4;
 
-Adafruit_MPU6050 mpu0;
-Adafruit_MPU6050 mpu1;
-Adafruit_MPU6050 mpu2;
-Adafruit_MPU6050 mpu3;
-Adafruit_MPU6050 mpu4;
+//-- Input parameters:
+
+// Gyro settings:
+#define         LP_FILTER   3           // Low pass filter.                    Value from 0 to 6
+#define         GYRO_SENS   0           // Gyro sensitivity.                   Value from 0 to 3
+#define         ACCEL_SENS  0           // Accelerometer sensitivity.          Value from 0 to 3
+#define         ADDRESS_A0  LOW         // I2C address from state of A0 pin.   A0 -> GND : ADDRESS_A0 = LOW
+                                        //                                     A0 -> 5v  : ADDRESS_A0 = HIGH
+// Accelerometer offset:
+constexpr int   AX_OFFSET =  552;       // Use these values to calibrate the accelerometer. The sensor should output 1.0g if held level. 
+constexpr int   AY_OFFSET = -241;       // These values are unlikely to be zero.
+constexpr int   AZ_OFFSET = -3185;
+
+// Output scale: 
+constexpr float AX_SCALE = 1.00457;     // Multiplier for accelerometer outputs. Use this to calibrate the sensor. If unknown set to 1.
+constexpr float AY_SCALE = 0.99170;
+constexpr float AZ_SCALE = 0.98317;
+
+constexpr float GX_SCALE = 0.99764;     // Multiplier to gyro outputs. Use this to calibrate the sensor. If unknown set to 1.
+constexpr float GY_SCALE = 1.0;
+constexpr float GZ_SCALE = 1.01037;
+
+// Bias estimate:
+#define         GYRO_BAND   35          // Standard deviation of the gyro signal. Gyro signals within this band (relative to the mean) are suppresed.   
+#define         BIAS_COUNT  5000        // Samples of the mean of the gyro signal. Larger values provide better calibration but delay suppression response. 
+
+//-- Set the template parameters:
+
+basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
+             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
+             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
+             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
+             GYRO_BAND,  BIAS_COUNT 
+            >imu0;
+
+basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
+             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
+             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
+             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
+             GYRO_BAND,  BIAS_COUNT 
+            >imu1;
+
+basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
+             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
+             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
+             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
+             GYRO_BAND,  BIAS_COUNT 
+            >imu2;
+
+basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
+             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
+             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
+             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
+             GYRO_BAND,  BIAS_COUNT 
+            >imu3;
+
+basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
+             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
+             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
+             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
+             GYRO_BAND,  BIAS_COUNT 
+            >imu4;
 
 sensor_msgs__msg__Imu msg0;
 sensor_msgs__msg__Imu msg1; 
@@ -50,9 +106,6 @@ sensor_msgs__msg__Imu msg2;
 sensor_msgs__msg__Imu msg3; 
 sensor_msgs__msg__Imu msg4; 
 
-
-//We also create the sensor event objects. We only need one object of each type
-sensors_event_t accel, gyro, temp;  
 
 #define LED_PIN 13 //This is for our error loop
 
@@ -98,63 +151,60 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     if (timer != NULL) 
     {
     tcaselect(0);  
-    mpu0.getEvent(&accel, &gyro, &temp);
+    imu0.updateBias();
     msg0.header.stamp.sec = (int)millis()/1000;
-    msg0.angular_velocity.x = gyro.gyro.x; 
-    msg0.angular_velocity.y = gyro.gyro.y;
-    msg0.angular_velocity.z = gyro.gyro.z;
-    msg0.linear_acceleration.x = accel.acceleration.x; 
-    msg0.linear_acceleration.y = accel.acceleration.y;
-    msg0.linear_acceleration.z = accel.acceleration.z;
+    msg0.angular_velocity.x = imu0.gx(); 
+    msg0.angular_velocity.y = imu0.gy();
+    msg0.angular_velocity.z = imu0.gz();
+    msg0.linear_acceleration.x = imu0.ax(); 
+    msg0.linear_acceleration.y = imu0.ay();
+    msg0.linear_acceleration.z = imu0.az();
     RCSOFTCHECK(rcl_publish(&publisher0, &msg0, NULL)); //We just do a temperature check once per loop
     //rcl_publish(&publisher0, &msg0, NULL);
 
-    tcaselect(1);
-    mpu1.getEvent(&accel, &gyro, &temp);
+    tcaselect(1);  
+    imu1.updateBias();
     msg1.header.stamp.sec = (int)millis()/1000;
-    msg1.angular_velocity.x = gyro.gyro.x; 
-    msg1.angular_velocity.y = gyro.gyro.y;
-    msg1.angular_velocity.z = gyro.gyro.z;
-    msg1.linear_acceleration.x = accel.acceleration.x; 
-    msg1.linear_acceleration.y = accel.acceleration.y;
-    msg1.linear_acceleration.z = accel.acceleration.z;
+    msg1.angular_velocity.x = imu1.gx(); 
+    msg1.angular_velocity.y = imu1.gy();
+    msg1.angular_velocity.z = imu1.gz();
+    msg1.linear_acceleration.x = imu1.ax(); 
+    msg1.linear_acceleration.y = imu1.ay();
+    msg1.linear_acceleration.z = imu1.az();
     rcl_publish(&publisher1, &msg1, NULL);
 
-
     tcaselect(2);  
-    mpu2.getEvent(&accel, &gyro, &temp);
+    imu2.updateBias();
     msg2.header.stamp.sec = (int)millis()/1000;
-    msg2.angular_velocity.x = gyro.gyro.x; 
-    msg2.angular_velocity.y = gyro.gyro.y;
-    msg2.angular_velocity.z = gyro.gyro.z;
-    msg2.linear_acceleration.x = accel.acceleration.x; 
-    msg2.linear_acceleration.y = accel.acceleration.y;
-    msg2.linear_acceleration.z = accel.acceleration.z;
+    msg2.angular_velocity.x = imu2.gx(); 
+    msg2.angular_velocity.y = imu2.gy();
+    msg2.angular_velocity.z = imu2.gz();
+    msg2.linear_acceleration.x = imu2.ax(); 
+    msg2.linear_acceleration.y = imu2.ay();
+    msg2.linear_acceleration.z = imu2.az();
     rcl_publish(&publisher2, &msg2, NULL);
 
-
     tcaselect(3);  
-    mpu3.getEvent(&accel, &gyro, &temp);
+    imu3.updateBias();
     msg3.header.stamp.sec = (int)millis()/1000;
-    msg3.angular_velocity.x = gyro.gyro.x; 
-    msg3.angular_velocity.y = gyro.gyro.y;
-    msg3.angular_velocity.z = gyro.gyro.z;
-    msg3.linear_acceleration.x = accel.acceleration.x; 
-    msg3.linear_acceleration.y = accel.acceleration.y;
-    msg3.linear_acceleration.z = accel.acceleration.z;
+    msg3.angular_velocity.x = imu3.gx(); 
+    msg3.angular_velocity.y = imu3.gy();
+    msg3.angular_velocity.z = imu3.gz();
+    msg3.linear_acceleration.x = imu3.ax(); 
+    msg3.linear_acceleration.y = imu3.ay();
+    msg3.linear_acceleration.z = imu3.az();
     rcl_publish(&publisher3, &msg3, NULL);
 
     tcaselect(4);  
-    mpu4.getEvent(&accel, &gyro, &temp);
+    imu4.updateBias();
     msg4.header.stamp.sec = (int)millis()/1000;
-    msg4.angular_velocity.x = gyro.gyro.x; 
-    msg4.angular_velocity.y = gyro.gyro.y;
-    msg4.angular_velocity.z = gyro.gyro.z;
-    msg4.linear_acceleration.x = accel.acceleration.x; 
-    msg4.linear_acceleration.y = accel.acceleration.y;
-    msg4.linear_acceleration.z = accel.acceleration.z;
+    msg4.angular_velocity.x = imu4.gx(); 
+    msg4.angular_velocity.y = imu4.gy();
+    msg4.angular_velocity.z = imu4.gz();
+    msg4.linear_acceleration.x = imu4.ax(); 
+    msg4.linear_acceleration.y = imu4.ay();
+    msg4.linear_acceleration.z = imu4.az();
     rcl_publish(&publisher4, &msg4, NULL);
-
     }
   }
 }
@@ -178,28 +228,25 @@ void setup()
 
   //Start all IMUs
   tcaselect(0);
-  mpu0.begin();
-  
+  imu0.setup();
+  imu0.setBias();
+
   tcaselect(1);
-  mpu1.begin();
+  imu1.setup();
+  imu1.setBias();
 
   tcaselect(2);
-  mpu2.begin();
-  
+  imu2.setup();
+  imu2.setBias();
+
   tcaselect(3);
-  mpu3.begin();
+  imu3.setup();
+  imu3.setBias();
 
   tcaselect(4);
-  mpu4.begin();
-  
-  /*
-  // set accelerometer range to +-8G
-  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-  // set gyro range to +- 500 deg/s
-  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-  // set filter bandwidth to 21 Hz
-  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  */
+  imu4.setup();
+  imu4.setBias();
+
 
   dmpReady = true;
 }
