@@ -1,3 +1,5 @@
+//As written this file gets about 73 messges per second (73Hz). We expect 200, and our goal is 100.
+
 //--Start Includes--//
 
 // ↓ Needed for micro_ros
@@ -12,7 +14,6 @@
 // ↓ Needed for the IMU
 #include <Adafruit_MPU6050.h> //https://github.com/adafruit/Adafruit_MPU6050
 #include <Adafruit_Sensor.h>  //https://github.com/adafruit/Adafruit_Sensor
-
 // ↑ Needed for mthe IMU
 
 //This is needed for the multiplexor
@@ -29,7 +30,6 @@ rclc_support_t support;
 rcl_allocator_t allocator;
 rcl_node_t node;
 rcl_timer_t timer; //If we want to run sensor updates at different intervals, we create more than one timer
-//
 
 //Now we created the publisher, mpu, and msg objects, numbered 0 to n-1, where n is the number of IMUs we have connected
 rcl_publisher_t publisher0;
@@ -45,10 +45,10 @@ Adafruit_MPU6050 mpu3;
 Adafruit_MPU6050 mpu4;
 
 sensor_msgs__msg__Imu msg0;
-sensor_msgs__msg__Imu msg1; //We want one message per imu so we can set the header for each
-sensor_msgs__msg__Imu msg2; //We want one message per imu so we can set the header for each
-sensor_msgs__msg__Imu msg3; //We want one message per imu so we can set the header for each
-sensor_msgs__msg__Imu msg4; //We want one message per imu so we can set the header for each
+sensor_msgs__msg__Imu msg1; 
+sensor_msgs__msg__Imu msg2; 
+sensor_msgs__msg__Imu msg3; 
+sensor_msgs__msg__Imu msg4; 
 
 
 //We also create the sensor event objects. We only need one object of each type
@@ -65,7 +65,7 @@ sensors_event_t accel, gyro, temp;
 
 //These states are used to help start the robot without physically disconnecting it
 bool micro_ros_init_successful;
-bool dmpReady = false;  // set true if DMP init was successful
+bool dmpReady = false;  // set true when DMP init is successful
 
 //These states are used to help start the robot without physically disconnecting it
 enum states
@@ -106,7 +106,8 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     msg0.linear_acceleration.x = accel.acceleration.x; 
     msg0.linear_acceleration.y = accel.acceleration.y;
     msg0.linear_acceleration.z = accel.acceleration.z;
-    RCSOFTCHECK(rcl_publish(&publisher0, &msg0, NULL));
+    RCSOFTCHECK(rcl_publish(&publisher0, &msg0, NULL)); //We just do a temperature check once per loop
+    //rcl_publish(&publisher0, &msg0, NULL);
 
     tcaselect(1);
     mpu1.getEvent(&accel, &gyro, &temp);
@@ -117,7 +118,8 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     msg1.linear_acceleration.x = accel.acceleration.x; 
     msg1.linear_acceleration.y = accel.acceleration.y;
     msg1.linear_acceleration.z = accel.acceleration.z;
-    RCSOFTCHECK(rcl_publish(&publisher1, &msg1, NULL));
+    rcl_publish(&publisher1, &msg1, NULL);
+
 
     tcaselect(2);  
     mpu2.getEvent(&accel, &gyro, &temp);
@@ -128,7 +130,8 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     msg2.linear_acceleration.x = accel.acceleration.x; 
     msg2.linear_acceleration.y = accel.acceleration.y;
     msg2.linear_acceleration.z = accel.acceleration.z;
-    RCSOFTCHECK(rcl_publish(&publisher2, &msg2, NULL));
+    rcl_publish(&publisher2, &msg2, NULL);
+
 
     tcaselect(3);  
     mpu3.getEvent(&accel, &gyro, &temp);
@@ -139,7 +142,7 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     msg3.linear_acceleration.x = accel.acceleration.x; 
     msg3.linear_acceleration.y = accel.acceleration.y;
     msg3.linear_acceleration.z = accel.acceleration.z;
-    RCSOFTCHECK(rcl_publish(&publisher3, &msg3, NULL));
+    rcl_publish(&publisher3, &msg3, NULL);
 
     tcaselect(4);  
     mpu4.getEvent(&accel, &gyro, &temp);
@@ -150,7 +153,8 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     msg4.linear_acceleration.x = accel.acceleration.x; 
     msg4.linear_acceleration.y = accel.acceleration.y;
     msg4.linear_acceleration.z = accel.acceleration.z;
-    RCSOFTCHECK(rcl_publish(&publisher4, &msg4, NULL));
+    rcl_publish(&publisher4, &msg4, NULL);
+
     }
   }
 }
@@ -171,7 +175,6 @@ void setup()
   msg2.header.frame_id.data = "imu2_header";
   msg3.header.frame_id.data = "imu3_header";
   msg4.header.frame_id.data = "imu4_header";
-
 
   //Start all IMUs
   tcaselect(0);
@@ -240,8 +243,7 @@ bool create_entities()
       ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
       "micro_ros_arduino_imu4_publisher"));
        
-
-  const unsigned int timer_timeout = 10;
+  const unsigned int timer_timeout = 5;
   RCCHECK(rclc_timer_init_default(
       &timer,
       &support,
@@ -261,6 +263,10 @@ void destroy_entities()
   //Make sure to destroy each publisher
   rcl_publisher_fini(&publisher0, &node);
   rcl_publisher_fini(&publisher1, &node);
+  rcl_publisher_fini(&publisher2, &node);
+  rcl_publisher_fini(&publisher3, &node);
+  rcl_publisher_fini(&publisher4, &node);
+  
   rcl_timer_fini(&timer);
   rclc_executor_fini(&executor);
   rcl_node_fini(&node);
@@ -302,6 +308,6 @@ void loop() {
   }
   if (state == AGENT_CONNECTED)
   {
-    RCSOFTCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1)));
+    RCSOFTCHECK(rclc_executor_spin_some(&executor, 1));
   }
 }
