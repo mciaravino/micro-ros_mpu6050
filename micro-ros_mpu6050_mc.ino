@@ -1,4 +1,4 @@
-//As written this file gets about  messges per second (Hz). We expect 200, and our goal is 100.
+//As written this file gets about 40 messges per second (Hz). We expect 200, and our goal is 100.
 
 //--Start Includes--//
 
