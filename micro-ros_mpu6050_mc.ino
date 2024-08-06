@@ -1,4 +1,4 @@
-//As written this file gets about 40 messges per second (Hz). We expect 200, and our goal is 100.
+//As written this file gets about 200 messges per second (Hz). We expect 200, and our goal is 100.
 
 //--Start Includes--//
 
@@ -12,8 +12,8 @@
 // ↑ Needed for micro_ros
 
 // ↓ Needed for the IMU
-#include <basicMPU6050.h> //https://github.com/RCmags/basicMPU6050/blob/main/examples/parameters/parameters.ino
-// ↑ Needed for mthe IMU
+#include "MPU6050_6Axis_MotionApps20.h"
+// ↑ Needed for the IMU
 
 //This is needed for the multiplexor
 #include <Wire.h>
@@ -39,73 +39,34 @@ rcl_publisher_t publisher4;
 
 //-- Input parameters:
 
-// Gyro settings:
-#define         LP_FILTER   3           // Low pass filter.                    Value from 0 to 6
-#define         GYRO_SENS   0           // Gyro sensitivity.                   Value from 0 to 3
-#define         ACCEL_SENS  0           // Accelerometer sensitivity.          Value from 0 to 3
-#define         ADDRESS_A0  LOW         // I2C address from state of A0 pin.   A0 -> GND : ADDRESS_A0 = LOW
-                                        //                                     A0 -> 5v  : ADDRESS_A0 = HIGH
-// Accelerometer offset:
-constexpr int   AX_OFFSET =  552;       // Use these values to calibrate the accelerometer. The sensor should output 1.0g if held level. 
-constexpr int   AY_OFFSET = -241;       // These values are unlikely to be zero.
-constexpr int   AZ_OFFSET = -3185;
-
-// Output scale: 
-constexpr float AX_SCALE = 1.00457;     // Multiplier for accelerometer outputs. Use this to calibrate the sensor. If unknown set to 1.
-constexpr float AY_SCALE = 0.99170;
-constexpr float AZ_SCALE = 0.98317;
-
-constexpr float GX_SCALE = 0.99764;     // Multiplier to gyro outputs. Use this to calibrate the sensor. If unknown set to 1.
-constexpr float GY_SCALE = 1.0;
-constexpr float GZ_SCALE = 1.01037;
-
-// Bias estimate:
-#define         GYRO_BAND   35          // Standard deviation of the gyro signal. Gyro signals within this band (relative to the mean) are suppresed.   
-#define         BIAS_COUNT  5000        // Samples of the mean of the gyro signal. Larger values provide better calibration but delay suppression response. 
-
-//-- Set the template parameters:
-
-basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
-             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
-             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
-             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
-             GYRO_BAND,  BIAS_COUNT 
-            >imu0;
-
-basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
-             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
-             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
-             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
-             GYRO_BAND,  BIAS_COUNT 
-            >imu1;
-
-basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
-             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
-             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
-             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
-             GYRO_BAND,  BIAS_COUNT 
-            >imu2;
-
-basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
-             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
-             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
-             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
-             GYRO_BAND,  BIAS_COUNT 
-            >imu3;
-
-basicMPU6050<LP_FILTER,  GYRO_SENS,  ACCEL_SENS, ADDRESS_A0,
-             AX_OFFSET,  AY_OFFSET,  AZ_OFFSET, 
-             &AX_SCALE,  &AY_SCALE,  &AZ_SCALE,
-             &GX_SCALE,  &GY_SCALE,  &GZ_SCALE,
-             GYRO_BAND,  BIAS_COUNT 
-            >imu4;
-
 sensor_msgs__msg__Imu msg0;
 sensor_msgs__msg__Imu msg1; 
 sensor_msgs__msg__Imu msg2; 
 sensor_msgs__msg__Imu msg3; 
-sensor_msgs__msg__Imu msg4; 
+sensor_msgs__msg__Imu msg4;
 
+MPU6050 imu0;
+MPU6050 imu1;
+MPU6050 imu2;
+MPU6050 imu3;
+MPU6050 imu4;
+
+// MPU control/status vars
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+// orientation/motion vars
+Quaternion q;        // [w, x, y, z] //the ros2 quat message expects xyzw        quaternion container
+VectorInt16 aa;      // [x, y, z]            accel sensor measurements
+VectorInt16 gg;      // [x, y, z]            gyro sensor measurements
+VectorInt16 aaWorld; // [x, y, z]            world-frame accel sensor measurements
+VectorInt16 ggWorld; // [x, y, z]            world-frame accel sensor measurements
+VectorFloat gravity; // [x, y, z]            gravity vector
+float euler[3];      // [psi, theta, phi]    Euler angle container
+float ypr[3];        // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
 #define LED_PIN 13 //This is for our error loop
 
@@ -151,59 +112,99 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     if (timer != NULL) 
     {
     tcaselect(0);  
-    imu0.updateBias();
-    msg0.header.stamp.sec = (int)millis()/1000;
-    msg0.angular_velocity.x = imu0.gx(); 
-    msg0.angular_velocity.y = imu0.gy();
-    msg0.angular_velocity.z = imu0.gz();
-    msg0.linear_acceleration.x = imu0.ax(); 
-    msg0.linear_acceleration.y = imu0.ay();
-    msg0.linear_acceleration.z = imu0.az();
+    imu0.dmpGetCurrentFIFOPacket(fifoBuffer);
+    imu0.dmpGetQuaternion(&q, fifoBuffer);
+    imu0.dmpGetGravity(&gravity, &q);
+    imu0.dmpGetAccel(&aa, fifoBuffer);
+    imu0.dmpGetGyro(&gg, fifoBuffer);
+    msg0.orientation.w = q.w;
+    msg0.orientation.x = q.x;
+    msg0.orientation.y = q.y;
+    msg0.orientation.z = q.z;
+    msg0.angular_velocity.x = (float)aa.x; // these might be gg not aa
+    msg0.angular_velocity.y = (float)aa.y;
+    msg0.angular_velocity.z = (float)aa.z;
+    msg0.linear_acceleration.x = (float)gg.x; // these might be aa not gg
+    msg0.linear_acceleration.y = (float)gg.y;
+    msg0.linear_acceleration.z = (float)gg.z;
+    msg0.header.stamp.sec = millis() / 1000;
     RCSOFTCHECK(rcl_publish(&publisher0, &msg0, NULL)); //We just do a temperature check once per loop
     //rcl_publish(&publisher0, &msg0, NULL);
 
     tcaselect(1);  
-    imu1.updateBias();
-    msg1.header.stamp.sec = (int)millis()/1000;
-    msg1.angular_velocity.x = imu1.gx(); 
-    msg1.angular_velocity.y = imu1.gy();
-    msg1.angular_velocity.z = imu1.gz();
-    msg1.linear_acceleration.x = imu1.ax(); 
-    msg1.linear_acceleration.y = imu1.ay();
-    msg1.linear_acceleration.z = imu1.az();
+    imu1.dmpGetCurrentFIFOPacket(fifoBuffer);
+    imu1.dmpGetQuaternion(&q, fifoBuffer);
+    imu1.dmpGetGravity(&gravity, &q);
+    imu1.dmpGetAccel(&aa, fifoBuffer);
+    imu1.dmpGetGyro(&gg, fifoBuffer);
+    msg1.orientation.w = q.w;
+    msg1.orientation.x = q.x;
+    msg1.orientation.y = q.y;
+    msg1.orientation.z = q.z;
+    msg1.angular_velocity.x = (float)aa.x; // these might be gg not aa
+    msg1.angular_velocity.y = (float)aa.y;
+    msg1.angular_velocity.z = (float)aa.z;
+    msg1.linear_acceleration.x = (float)gg.x; // these might be aa not gg
+    msg1.linear_acceleration.y = (float)gg.y;
+    msg1.linear_acceleration.z = (float)gg.z;
+    msg1.header.stamp.sec = millis() / 1000;
     rcl_publish(&publisher1, &msg1, NULL);
 
     tcaselect(2);  
-    imu2.updateBias();
-    msg2.header.stamp.sec = (int)millis()/1000;
-    msg2.angular_velocity.x = imu2.gx(); 
-    msg2.angular_velocity.y = imu2.gy();
-    msg2.angular_velocity.z = imu2.gz();
-    msg2.linear_acceleration.x = imu2.ax(); 
-    msg2.linear_acceleration.y = imu2.ay();
-    msg2.linear_acceleration.z = imu2.az();
+    imu2.dmpGetCurrentFIFOPacket(fifoBuffer);
+    imu2.dmpGetQuaternion(&q, fifoBuffer);
+    imu2.dmpGetGravity(&gravity, &q);
+    imu2.dmpGetAccel(&aa, fifoBuffer);
+    imu2.dmpGetGyro(&gg, fifoBuffer);
+    msg2.orientation.w = q.w;
+    msg2.orientation.x = q.x;
+    msg2.orientation.y = q.y;
+    msg2.orientation.z = q.z;
+    msg2.angular_velocity.x = (float)aa.x; // these might be gg not aa
+    msg2.angular_velocity.y = (float)aa.y;
+    msg2.angular_velocity.z = (float)aa.z;
+    msg2.linear_acceleration.x = (float)gg.x; // these might be aa not gg
+    msg2.linear_acceleration.y = (float)gg.y;
+    msg2.linear_acceleration.z = (float)gg.z;
+    msg2.header.stamp.sec = millis() / 1000;
     rcl_publish(&publisher2, &msg2, NULL);
 
     tcaselect(3);  
-    imu3.updateBias();
-    msg3.header.stamp.sec = (int)millis()/1000;
-    msg3.angular_velocity.x = imu3.gx(); 
-    msg3.angular_velocity.y = imu3.gy();
-    msg3.angular_velocity.z = imu3.gz();
-    msg3.linear_acceleration.x = imu3.ax(); 
-    msg3.linear_acceleration.y = imu3.ay();
-    msg3.linear_acceleration.z = imu3.az();
+    imu3.dmpGetCurrentFIFOPacket(fifoBuffer);
+    imu3.dmpGetQuaternion(&q, fifoBuffer);
+    imu3.dmpGetGravity(&gravity, &q);
+    imu3.dmpGetAccel(&aa, fifoBuffer);
+    imu3.dmpGetGyro(&gg, fifoBuffer);
+    msg3.orientation.w = q.w;
+    msg3.orientation.x = q.x;
+    msg3.orientation.y = q.y;
+    msg3.orientation.z = q.z;
+    msg3.angular_velocity.x = (float)aa.x; // these might be gg not aa
+    msg3.angular_velocity.y = (float)aa.y;
+    msg3.angular_velocity.z = (float)aa.z;
+    msg3.linear_acceleration.x = (float)gg.x; // these might be aa not gg
+    msg3.linear_acceleration.y = (float)gg.y;
+    msg3.linear_acceleration.z = (float)gg.z;
+    msg3.header.stamp.sec = millis() / 1000;
     rcl_publish(&publisher3, &msg3, NULL);
 
     tcaselect(4);  
-    imu4.updateBias();
-    msg4.header.stamp.sec = (int)millis()/1000;
-    msg4.angular_velocity.x = imu4.gx(); 
-    msg4.angular_velocity.y = imu4.gy();
-    msg4.angular_velocity.z = imu4.gz();
-    msg4.linear_acceleration.x = imu4.ax(); 
-    msg4.linear_acceleration.y = imu4.ay();
-    msg4.linear_acceleration.z = imu4.az();
+    imu4.dmpGetCurrentFIFOPacket(fifoBuffer);
+    imu4.dmpGetQuaternion(&q, fifoBuffer);
+    imu4.dmpGetGravity(&gravity, &q);
+    imu4.dmpGetAccel(&aa, fifoBuffer);
+    imu4.dmpGetGyro(&gg, fifoBuffer);
+    msg4.orientation.w = q.w;
+    msg4.orientation.x = q.x;
+    msg4.orientation.y = q.y;
+    msg4.orientation.z = q.z;
+    msg4.angular_velocity.x = (float)aa.x; // these might be gg not aa
+    msg4.angular_velocity.y = (float)aa.y;
+    msg4.angular_velocity.z = (float)aa.z;
+    msg4.linear_acceleration.x = (float)gg.x; // these might be aa not gg
+    msg4.linear_acceleration.y = (float)gg.y;
+    msg4.linear_acceleration.z = (float)gg.z;
+    msg4.header.stamp.sec = millis() / 1000;
     rcl_publish(&publisher4, &msg4, NULL);
     }
   }
@@ -228,25 +229,54 @@ void setup()
 
   //Start all IMUs
   tcaselect(0);
-  imu0.setup();
-  imu0.setBias();
+  imu0.initialize();
+  imu0.dmpInitialize();
+  imu0.setXGyroOffset(-156); // supply your own gyro offsets here, scaled for min sensitivity
+  imu0.setYGyroOffset(-11);
+  imu0.setZGyroOffset(-14);
+  imu0.setXAccelOffset(-3699);
+  imu0.setYAccelOffset(-2519);
+  imu0.setZAccelOffset(1391);
 
   tcaselect(1);
-  imu1.setup();
-  imu1.setBias();
+  imu1.initialize();
+  imu1.dmpInitialize();
+  imu1.setXGyroOffset(-156); // supply your own gyro offsets here, scaled for min sensitivity
+  imu1.setYGyroOffset(-11);
+  imu1.setZGyroOffset(-14);
+  imu1.setXAccelOffset(-3699);
+  imu1.setYAccelOffset(-2519);
+  imu1.setZAccelOffset(1391);
 
   tcaselect(2);
-  imu2.setup();
-  imu2.setBias();
+  imu2.initialize();
+  imu2.dmpInitialize();
+  imu2.setXGyroOffset(-156); // supply your own gyro offsets here, scaled for min sensitivity
+  imu2.setYGyroOffset(-11);
+  imu2.setZGyroOffset(-14);
+  imu2.setXAccelOffset(-3699);
+  imu2.setYAccelOffset(-2519);
+  imu2.setZAccelOffset(1391);
 
   tcaselect(3);
-  imu3.setup();
-  imu3.setBias();
+  imu3.initialize();
+  imu3.dmpInitialize();
+  imu3.setXGyroOffset(-156); // supply your own gyro offsets here, scaled for min sensitivity
+  imu3.setYGyroOffset(-11);
+  imu3.setZGyroOffset(-14);
+  imu3.setXAccelOffset(-3699);
+  imu3.setYAccelOffset(-2519);
+  imu3.setZAccelOffset(1391);
 
   tcaselect(4);
-  imu4.setup();
-  imu4.setBias();
-
+  imu4.initialize();
+  imu4.dmpInitialize();
+  imu4.setXGyroOffset(-156); // supply your own gyro offsets here, scaled for min sensitivity
+  imu4.setYGyroOffset(-11);
+  imu4.setZGyroOffset(-14);
+  imu4.setXAccelOffset(-3699);
+  imu4.setYAccelOffset(-2519);
+  imu4.setZAccelOffset(1391);
 
   dmpReady = true;
 }
