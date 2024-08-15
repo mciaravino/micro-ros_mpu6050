@@ -1,26 +1,31 @@
-//As written this file gets about 200 messges per second (Hz). We expect 200, and our goal is 100.
 
 //--Start Includes--//
 
-// ↓ Needed for micro_ros
+// Needed for micro_ros
 #include <micro_ros_arduino.h>
 #include <stdio.h>
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
-// ↑ Needed for micro_ros
 
-// ↓ Needed for the IMU
+// Needed for the IMU
 #include "MPU6050_6Axis_MotionApps20.h"
-// ↑ Needed for the IMU
 
 //This is needed for the multiplexor
 #include <Wire.h>
 
-// This is the message format we will use. There are other options though
+// This is the message format we will use for the IMU. There are other options though
 #include <sensor_msgs/msg/imu.h> //http://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/Imu.html
 
+//Needed for CanBus / ODrive 
+#include <Arduino.h>
+#include "ODriveCAN.h"
+
+// See https://github.com/tonton81/FlexCAN_T4
+// clone https://github.com/tonton81/FlexCAN_T4.git into /src
+#include <FlexCAN_T4.h>
+#include "ODriveFlexCAN.hpp"
 
 //--End Includes--//
 
@@ -88,155 +93,29 @@ enum states
   AGENT_DISCONNECTED
 } state;
 
-/* Begin ODrive section 
-#include <Arduino.h> //Needed for the ODrive Pro
-#include "ODriveCAN.h"  //Needed for hte ODrive Pro
-
 // CAN bus baudrate. Make sure this matches for every device on the bus
 #define CAN_BAUDRATE 250000
+
 // ODrive node_id for odrv0
 #define ODRV0_NODE_ID 0
 
-// Uncomment below the line that corresponds to your hardware.
 
-// See also "Board-specific settings" to adapt the details for your hardware setup.
+//This starts the CanBus interface
+FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> can_intf;
 
-#define IS_TEENSY_BUILTIN // Teensy boards with built-in CAN interface (e.g. Teensy 4.1). See below to select which interface to use.
-// #define IS_ARDUINO_BUILTIN // Arduino boards with built-in CAN interface (e.g. Arduino Uno R4 Minima)
-#define IS_MCP2515 // Any board with external MCP2515 based extension module. See below to configure the module.
+// Instantiate ODrive objects
+ODriveCAN odrv0(wrap_can_intf(can_intf), ODRV0_NODE_ID); // Standard CAN message ID
+ODriveCAN* odrives[] = {&odrv0}; // Make sure all ODriveCAN instances are accounted for here
 
+// Keep some application-specific user data for every ODrive.
+struct ODriveUserData {
+  Heartbeat_msg_t last_heartbeat;
+  bool received_heartbeat = false;
+  Get_Encoder_Estimates_msg_t last_feedback;
+  bool received_feedback = false;
+};
 
-
-/* Board-specific includes ---------------------------------------------------
-
-
-#if defined(IS_TEENSY_BUILTIN) + defined(IS_ARDUINO_BUILTIN) + defined(IS_MCP2515) != 1
-  #warning "Select exactly one hardware option at the top of this file."
-  #if CAN_HOWMANY > 0 || CANFD_HOWMANY > 0
-    #define IS_ARDUINO_BUILTIN
-    #warning "guessing that this uses HardwareCAN"
-  #else
-    #error "cannot guess hardware version"
-  #endif
-#endif
-
-
-#ifdef IS_ARDUINO_BUILTIN
-// See https://github.com/arduino/ArduinoCore-API/blob/master/api/HardwareCAN.h
-// and https://github.com/arduino/ArduinoCore-renesas/tree/main/libraries/Arduino_CAN
-#include <Arduino_CAN.h>
-#include <ODriveHardwareCAN.hpp>
-#endif // IS_ARDUINO_BUILTIN
-
-#ifdef IS_MCP2515
-  // See https://github.com/sandeepmistry/arduino-CAN/
-  #include "MCP2515.h"
-  #include "ODriveMCPCAN.hpp"
-#endif // IS_MCP2515
-
-#ifdef IS_TEENSY_BUILTIN
-  // See https://github.com/tonton81/FlexCAN_T4
-  // clone https://github.com/tonton81/FlexCAN_T4.git into /src
-  #include <FlexCAN_T4.h>
-  #include "ODriveFlexCAN.hpp"
-  struct ODriveStatus; // hack to prevent teensy compile error
-#endif // IS_TEENSY_BUILTIN
-
-/* Teensy 
-#ifdef IS_TEENSY_BUILTIN
-  FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> can_intf;
-  bool setupCan() {
-    can_intf.begin();
-    can_intf.setBaudRate(CAN_BAUDRATE);
-    can_intf.setMaxMB(16);
-    can_intf.enableFIFO();
-    can_intf.enableFIFOInterrupt();
-    can_intf.onReceive(onCanMessage);
-    return true;
-  }
-#endif // IS_TEENSY_BUILTIN
-
-/* MCP2515-based extension modules -
-#ifdef IS_MCP2515
-MCP2515Class& can_intf = CAN;
-// chip select pin used for the MCP2515
-#define MCP2515_CS 10
-// interrupt pin used for the MCP2515
-// NOTE: not all Arduino pins are interruptable, check the documentation for your board!
-#define MCP2515_INT 2
-
-
-// freqeuncy of the crystal oscillator on the MCP2515 breakout board. 
-
-// common values are: 16 MHz, 12 MHz, 8 MHz
-
-#define MCP2515_CLK_HZ 8000000
-
-
-
-static inline void receiveCallback(int packet_size) {
-
-  if (packet_size > 8) {
-
-    return; // not supported
-
-  }
-
-  CanMsg msg = {.id = (unsigned int)CAN.packetId(), .len = (uint8_t)packet_size};
-
-  CAN.readBytes(msg.buffer, packet_size);
-
-  onCanMessage(msg);
-
-}
-
-
-bool setupCan() {
-
-  // configure and initialize the CAN bus interface
-
-  CAN.setPins(MCP2515_CS, MCP2515_INT);
-
-  CAN.setClockFrequency(MCP2515_CLK_HZ);
-
-  if (!CAN.begin(CAN_BAUDRATE)) {
-
-    return false;
-
-  }
-
-
-  CAN.onReceive(receiveCallback);
-
-  return true;
-
-}
-
-
-#endif // IS_MCP2515
-
-
-
-/* Arduinos with built-in CAN 
-
-
-#ifdef IS_ARDUINO_BUILTIN
-
-
-HardwareCAN& can_intf = CAN;
-
-
-bool setupCan() {
-
-  return can_intf.begin((CanBitRate)CAN_BAUDRATE);
-
-}
-
-
-#endif
-
-//End 
-*/
+ODriveUserData odrv0_user_data;
 
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 //This is essentially our loop function
@@ -248,6 +127,7 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     {
     /*This is effectively our loop() function*/
     loopIMU();
+    loopODrive();
     /*End is effectively loop*/
     }
   }
@@ -256,14 +136,23 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time)
 void setup() 
   {
   state = WAITING_AGENT;
+
   Wire.begin();
-  
+  Serial.begin(115200);
+  // Wait for up to 3 seconds for the serial port to be opened on the PC side.
+  // If no PC connects, continue anyway.
+  for (int i = 0; i < 30 && !Serial; ++i) {
+    delay(100);
+  }
+
   set_microros_transports();
   
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);  
 
   setupIMU();
+  setupCan();
+  setupODrive();
   
 }
 
